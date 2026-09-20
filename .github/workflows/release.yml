@@ -1,0 +1,99 @@
+name: Release
+
+# Builds, signs (Developer ID + hardened runtime), notarizes, staples, and
+# publishes a universal (arm64 + x86_64) macOS build of MdReader as a GitHub Release.
+#
+# Trigger: push a version tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`),
+# or run manually from the Actions tab.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   DEVELOPER_ID_P12_BASE64  base64 of the Developer ID Application cert + key (.p12):
+#                          `base64 -i DeveloperID.p12 | pbcopy`
+#   P12_PASSWORD           the .p12 export password.
+#   NOTARY_APPLE_ID        Apple ID email of the developer account.
+#   NOTARY_PASSWORD        app-specific password for that Apple ID.
+#
+# MdReader targets macOS 14 / Swift 5, so the stock Xcode on the macOS runner
+# is sufficient. The project builds ad-hoc unsigned; Developer ID signing is
+# applied here as a separate step, so no project signing settings are required.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the GitHub Release
+
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      SIGN_ID: "Developer ID Application: John Coleman (FLRY8TR76J)"
+      TEAM_ID: FLRY8TR76J
+      APP: build/Build/Products/Release/MdReader.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Import Developer ID certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          KEY_PW="$(uuidgen)"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEY_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEY_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEY_PW" "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build (Release, unsigned)
+        run: |
+          xcodebuild -project MdReader.xcodeproj -scheme MdReader \
+            -configuration Release -destination 'platform=macOS' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+
+      - name: Sign (Developer ID + hardened runtime)
+        run: |
+          codesign --force --options runtime --timestamp -s "$SIGN_ID" "$APP"
+          codesign --verify --deep --strict --verbose=1 "$APP"
+
+      - name: Notarize + staple
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/submit.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/submit.zip" \
+            --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" \
+            --team-id "$TEAM_ID" --wait
+          xcrun stapler staple "$APP"
+
+      - name: Package
+        run: |
+          NAME="MdReader-${GITHUB_REF_NAME:-manual}-universal.zip"
+          ditto -c -k --keepParent "$APP" "$NAME"
+          echo "ZIP=$NAME" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$ZIP" \
+            --title "MdReader $GITHUB_REF_NAME" \
+            --notes $'Notarized universal macOS build (Apple Silicon + Intel).\n\nDownload, unzip, and move MdReader.app to /Applications.'
+
+      - name: Upload artifact (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: MdReader-universal
+          path: ${{ env.ZIP }}

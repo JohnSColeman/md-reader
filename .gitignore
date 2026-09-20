@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Xcode build output / derived data
+build/
+DerivedData/
+*.xcarchive
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+
+# Signing material (never commit)
+*.p12
+*.cer
+*.mobileprovision
