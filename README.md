@@ -7,6 +7,14 @@ PDF** via the standard print dialog) from the **File** menu.
 
 ![Sample render](Samples/images/hero.png)
 
+## Download
+
+Grab the latest **notarized, universal** (Apple Silicon + Intel) build from the
+[**Releases**](https://github.com/JohnSColeman/md-reader/releases/latest) page.
+Download the `.zip`, unzip it, and move **MdReader.app** to `/Applications`.
+Because it's signed with a Developer ID and notarized by Apple, it opens without
+Gatekeeper warnings.
+
 ## Features
 
 - **Tables** — full GFM table support with alignment and zebra striping.
@@ -81,6 +89,24 @@ note below).
 Try it with the included sample: **`Samples/Welcome.md`** — open it from within
 the app, or right‑click the file ▸ *Open With* ▸ MdReader.
 
+## Releasing
+
+Distribution builds are produced by the **Release** GitHub Actions workflow
+([`.github/workflows/release.yml`](.github/workflows/release.yml)). Pushing a
+version tag builds a universal Release binary, signs it with Developer ID and a
+hardened runtime, notarizes and staples it, and publishes a GitHub Release with
+the zipped app attached:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow relies on four repository secrets (`DEVELOPER_ID_P12_BASE64`,
+`P12_PASSWORD`, `NOTARY_APPLE_ID`, `NOTARY_PASSWORD`); see the header comment in
+the workflow file for details. It can also be run manually from the **Actions**
+tab, which uploads the app as a workflow artifact instead of publishing a release.
+
 ## How it works
 
 - **`MdReaderApp`** — a SwiftUI `DocumentGroup(viewing:)` app; document open,
@@ -106,10 +132,15 @@ from the document's folder. If you sandbox it for App Store distribution, add
 `com.apple.security.files.user-selected.read-only` and resolve sibling images
 via a security‑scoped bookmark of the document's parent folder.
 
-## Third‑party licenses
+## License
+
+MdReader is licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE).
+
+### Third‑party licenses
 
 - marked — MIT
 - mermaid — MIT
 - highlight.js — BSD‑3‑Clause
+- KaTeX — MIT
 
 Bundled builds live in `MdReader/Web/`.
